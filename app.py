@@ -13,6 +13,9 @@ Built with LangChain + Groq (open-source models) + Streamlit.
 
 import os
 
+# Must be set before transformers/torch are imported
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import streamlit as st
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
@@ -73,12 +76,17 @@ with st.sidebar:
     st.header("1. Upload PDF")
     uploaded = st.file_uploader("Choose a PDF", type=["pdf"])
 
-    vectorstore = None
-    if uploaded is not None:
+    # (Re)index only when a NEW file is uploaded — not on every rerun/question
+    if uploaded is not None and (
+        "indexed_file" not in st.session_state
+        or st.session_state.indexed_file != uploaded.name
+    ):
         with st.spinner("Indexing PDF... (parsing → chunking → embedding)"):
             # Persist the upload to a temp file so PyPDFLoader can read it
-            tmp_path = os.path.join(st.session_state.get("tmp_dir", "."), uploaded.name)
-            os.makedirs(os.path.dirname(tmp_path), exist_ok=True)
+            tmp_path = os.path.join(
+                st.session_state.get("tmp_dir", "."), uploaded.name
+            )
+            os.makedirs(os.path.dirname(tmp_path) or ".", exist_ok=True)
             with open(tmp_path, "wb") as f:
                 f.write(uploaded.getvalue())
 
@@ -87,18 +95,28 @@ with st.sidebar:
                 chunk_size=1000, chunk_overlap=200
             )
             chunks = splitter.split_documents(docs)
-            vectorstore = FAISS.from_documents(chunks, get_embeddings())
+            st.session_state.vectorstore = FAISS.from_documents(
+                chunks, get_embeddings()
+            )
+            st.session_state.indexed_file = uploaded.name
 
         st.success(f"✅ Indexed {len(chunks)} chunks from {len(docs)} pages.")
 
+    if "indexed_file" in st.session_state:
+        st.success(f"✅ Indexed: {st.session_state.indexed_file}")
         model = st.selectbox(
             "Groq model",
             ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "allam-2-7b"],
             index=0,
+            key="model",
         )
-        st.header("2. Ask questions")
+        if st.button("🗑️ Clear document & chat"):
+            for key in ("vectorstore", "indexed_file", "messages"):
+                st.session_state.pop(key, None)
+            st.rerun()
 
 # ---------- Main: Q&A ----------
+vectorstore = st.session_state.get("vectorstore")
 if vectorstore is None:
     st.info("👈 Upload a PDF in the sidebar to get started.")
     st.stop()
@@ -115,21 +133,41 @@ def pdf_search(question: str) -> list:
 question = st.text_input("Your question about the PDF:", key="q")
 ask = st.button("Ask", type="primary")
 
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Render chat history (works for any number of questions)
+for msg in st.session_state.messages:
+    if msg["role"] == "user":
+        st.markdown(f"**🧑 You:** {msg['content']}")
+    else:
+        st.markdown(f"**💬 Answer:** {msg['content']}")
+        with st.expander("🔎 Retrieved chunks (sources)"):
+            for i, doc in enumerate(msg["docs"], 1):
+                page = doc.metadata.get("page", "?")
+                st.markdown(
+                    f"**Chunk {i} — page "
+                    f"{int(page) + 1 if isinstance(page, int) else page}**"
+                )
+                st.text(doc.page_content[:800])
+
 if ask and question:
     with st.spinner("Searching the document and generating an answer..."):
         context_docs = pdf_search.invoke({"question": question})
-        chain = PROMPT | get_llm(model)
+        chain = PROMPT | get_llm(
+            st.session_state.get(
+                "model", "openai/gpt-oss-120b"
+            )
+        )
         answer = chain.invoke(
             {"context": format_docs(context_docs), "question": question}
         )
 
-    st.markdown("### 💬 Answer")
-    st.write(answer.content)
-
-    with st.expander("🔎 Retrieved chunks (sources)"):
-        for i, doc in enumerate(context_docs, 1):
-            page = doc.metadata.get("page", "?")
-            st.markdown(f"**Chunk {i} — page {int(page) + 1 if isinstance(page, int) else page}**")
-            st.text(doc.page_content[:800])
+    st.session_state.messages.append({"role": "user", "content": question})
+    st.session_state.messages.append(
+        {"role": "assistant", "content": answer.content, "docs": context_docs}
+    )
+    st.rerun()
 elif ask:
     st.warning("Please enter a question first.")
+
