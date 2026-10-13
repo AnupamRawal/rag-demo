@@ -1,0 +1,29 @@
+[project]
+name = "langchain-rag-demo"
+version = "0.1.0"
+description = "PDF RAG demo: Streamlit + LangChain + Groq open-source models"
+readme = "README.md"
+authors = [
+    { name = "AnupamRawal", email = "rawalanupam5@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "faiss-cpu>=1.15.1",
+    "pypdf>=6.20.1",
+    "streamlit>=1.65.0",
+    "langchain>=1.0",
+    "langchain-community>=0.4",
+    "langchain-core>=1.0",
+    "langchain-groq>=1.0",
+    "langchain-huggingface>=1.0",
+    "langchain-text-splitters>=1.0",
+    "sentence-transformers>=5.0",
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+langchain-rag-demo = "langchain_rag_demo:main"
+
+[build-system]
+requires = ["uv_build>=0.12.15,<0.13.0"]
+build-backend = "uv_build"
