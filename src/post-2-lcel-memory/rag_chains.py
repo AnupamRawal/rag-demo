@@ -29,8 +29,7 @@ from langchain_core.runnables import (
 )
 from langchain_groq import ChatGroq
 
-# Prompts ------------------------------------------------------------------
-
+# Prompts
 SIMPLE_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
@@ -79,10 +78,7 @@ def make_llm(model: str, temperature: float) -> ChatGroq:
     return ChatGroq(model=model, temperature=temperature)
 
 
-# --------------------------------------------------------------------------
-# Mode 1: Simple RAG (no memory)
-# --------------------------------------------------------------------------
-def build_simple_chain(llm, retriever):
+def build_simple_chain(llm, retriever, metadata_sink: dict | None = None):
     """
     LCEL: retriever -> prompt -> llm -> StrOutputParser.
 
@@ -90,23 +86,27 @@ def build_simple_chain(llm, retriever):
     is fetched with that same (unmodified) question — this is exactly the
     limitation we demonstrate: a follow-up like "why is it better?" is used
     as-is for retrieval and misses the real subject ("multi-head attention").
+
+    metadata_sink (optional) records the retrieved chunks so the sources
+    panel can show them.
     """
+
+    def retrieve_step(x):
+        t0 = time.perf_counter()
+        docs = retriever.invoke(x["question"])
+        if metadata_sink is not None:
+            metadata_sink["chunks"] = docs
+            metadata_sink["retrieve_seconds"] = time.perf_counter() - t0
+        return "\n\n---\n\n".join(d.page_content for d in docs)
+
     return (
-        # Step: fetch context with the RAW question (no history, no rewrite)
-        RunnablePassthrough.assign(
-            context=lambda x: "\n\n---\n\n".join(
-                d.page_content for d in retriever.invoke(x["question"])
-            )
-        )
-        | SIMPLE_PROMPT  # Step: fill the prompt template
-        | llm            # Step: generate the answer
-        | StrOutputParser()  # Step: extract the plain string
+        RunnablePassthrough.assign(context=retrieve_step)
+        | SIMPLE_PROMPT
+        | llm
+        | StrOutputParser()
     )
 
 
-# --------------------------------------------------------------------------
-# Mode 2: LCEL + memory
-# --------------------------------------------------------------------------
 def build_memory_chain(llm, retriever, get_session_history, metadata_sink: dict):
     """
     Full conversational RAG, built entirely with LCEL and wrapped in
@@ -116,8 +116,7 @@ def build_memory_chain(llm, retriever, get_session_history, metadata_sink: dict)
     standalone question and per-step latencies in the metadata panel.
     """
 
-    # Step 1 — question rewrite. Runs only when history exists; a plain
-    # RunnableLambda lets us skip the LLM call when the history is empty.
+    # Skips the rewrite LLM call when history is empty
     def rewrite_step(inputs):
         history = inputs.get("history") or []
         question = inputs["question"]
@@ -134,7 +133,7 @@ def build_memory_chain(llm, retriever, get_session_history, metadata_sink: dict)
         metadata_sink["rewrite_seconds"] = time.perf_counter() - t0
         return standalone
 
-    # Step 2 — retrieve with the standalone (rewritten) question.
+    # Retrieve with the standalone (rewritten) question
     def retrieve_step(inputs):
         t0 = time.perf_counter()
         docs = retriever.invoke(inputs["standalone_question"])
@@ -142,11 +141,6 @@ def build_memory_chain(llm, retriever, get_session_history, metadata_sink: dict)
         metadata_sink["chunks"] = docs
         return "\n\n---\n\n".join(d.page_content for d in docs)
 
-    # Step 3 — assemble with LCEL: RunnablePassthrough.assign threads
-    # history -> standalone_question -> context through the input dict,
-    # then the answer prompt + LLM. RunnableWithMessageHistory injects the
-    # stored messages under "history" (matches MessagesPlaceholder("history"))
-    # for the session_id passed via config at call time.
     full_chain = (
         RunnablePassthrough.assign(standalone_question=rewrite_step).assign(
             context=retrieve_step

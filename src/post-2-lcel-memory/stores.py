@@ -46,7 +46,6 @@ class SourceLoadResult:
 
 
 def get_embeddings() -> HuggingFaceEmbeddings:
-    # Cached by the caller (st.cache_resource) — one model instance is reused.
     return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
 
@@ -68,7 +67,6 @@ def load_source(spec: SourceSpec) -> SourceLoadResult:
         if not docs or all(not d.page_content.strip() for d in docs):
             raise ValueError("No extractable text found (empty file?)")
 
-        # Tag every document with loader + source metadata
         for d in docs:
             d.metadata["loader"] = spec.loader_name
             d.metadata["source_name"] = spec.display_name
@@ -86,6 +84,5 @@ def build_vector_store(store_type: str, chunks: list[Document], embeddings):
     if store_type == "FAISS":
         return FAISS.from_documents(chunks, embeddings)
     if store_type == "Chroma":
-        # Ephemeral in-memory Chroma — no on-disk persistence for a demo
         return Chroma.from_documents(chunks, embeddings)
     raise ValueError(f"Unknown vector store: {store_type}")

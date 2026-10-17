@@ -17,6 +17,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import streamlit as st
 from dotenv import load_dotenv
+from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from rag_chains import (
@@ -53,20 +54,15 @@ def save_upload(uploaded_file) -> str:
     return path
 
 
-# --------------------------------------------------------------------------
-# Sidebar — sources, store, model, modes
-# --------------------------------------------------------------------------
 with st.sidebar:
     st.header("1. Document sources")
 
-    # Per-spec: one LangChain loader per source type (see stores.py)
     pdf_file = st.file_uploader("PDF (PyPDFLoader)", type=["pdf"])
     text_file = st.file_uploader(
         "Text / Markdown (TextLoader)", type=["txt", "md"]
     )
     url_input = st.text_input("Web URL (WebBaseLoader)", placeholder="https://...")
 
-    # Build the current set of sources from all inputs
     specs: list[SourceSpec] = []
     if pdf_file:
         specs.append(
@@ -101,7 +97,6 @@ with st.sidebar:
         st.session_state.history_store = {}
         st.rerun()
 
-    # Loaded documents summary (real measured values only)
     if "summaries" in st.session_state:
         st.divider()
         st.subheader("📄 Loaded documents")
@@ -116,9 +111,7 @@ with st.sidebar:
                 )
         st.caption(f"Index built in {st.session_state.index_seconds}s")
 
-# --------------------------------------------------------------------------
-# Indexing — cached in session_state, rebuilt when sources/store change
-# --------------------------------------------------------------------------
+# Rebuild the index only when sources/store change (every chat message is a rerun)
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "history_store" not in st.session_state:
@@ -265,14 +258,21 @@ if prompt := st.chat_input("Ask a question about your sources..."):
         sink: dict = {}  # rag_chains writes measured step data here
 
         try:
+            # Usage callback captures token usage from the LLM call(s)
+            # regardless of chain output type (StrOutputParser strips
+            # usage_metadata from the final value).
+            usage_cb = UsageMetadataCallbackHandler()
             if rag_mode == "Simple RAG (no memory)":
                 # Simple RAG: raw question only — the limitation we demo
-                chain = build_simple_chain(llm, retriever)
-                config = {}
+                chain = build_simple_chain(llm, retriever, sink)
+                config = {"callbacks": [usage_cb]}
             else:
                 # LCEL + memory: rewrite -> retrieve -> answer with history
                 chain = build_memory_chain(llm, retriever, history_factory, sink)
-                config = {"configurable": {"session_id": SESSION_ID}}
+                config = {
+                    "configurable": {"session_id": SESSION_ID},
+                    "callbacks": [usage_cb],
+                }
             inputs = {"question": prompt}
 
             if response_mode == "invoke":
@@ -317,6 +317,16 @@ if prompt := st.chat_input("Ask a question about your sources..."):
             meta["standalone_question"] = sink.get("standalone_question")
             meta["rewrite_seconds"] = sink.get("rewrite_seconds", 0.0)
             meta["retrieve_seconds"] = sink.get("retrieve_seconds", 0.0)
+            # Prefer the callback-captured usage (works for every mode);
+            # fall back to usage_metadata on the result/stream chunks.
+            if usage_cb.usage_metadata:
+                usage = usage_cb.usage_metadata
+                # Single-model runs: flatten to the standard
+                # {input_tokens, output_tokens, total_tokens} shape.
+                if len(usage) == 1:
+                    meta["usage"] = next(iter(usage.values()))
+                else:
+                    meta["usage"] = usage
 
             render_sources(chunks)
             render_metadata(meta)
