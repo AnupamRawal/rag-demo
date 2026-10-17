@@ -1,52 +1,48 @@
-# PDF RAG Demo (LangChain + Groq + Streamlit)
+# 🧠 RAG Demo Series (LangChain + Groq + Streamlit)
 
-Upload a PDF and ask questions about it.
+A progression of RAG demos built with LangChain (LCEL), Groq open-source models, HuggingFace embeddings, and Streamlit.
+
+## Folders
+
+| Folder | What it shows |
+|---|---|
+| [`post-1-simple-pdf-rag/`](post-1-simple-pdf-rag/) | Basic PDF RAG: upload → chunk → FAISS → grounded answer via a `pdf_search` tool. No memory, one source, invoke only. |
+| [`post-2-lcel-memory/`](post-2-lcel-memory/) | Simple RAG **vs** LCEL + memory, side by side. Multi-source loading (PDF, TXT/MD, web URL), FAISS/Chroma switch, temperature slider, invoke/stream/astream, sources + measured metadata panel. |
 
 ## Stack
+
 - **UI / server**: Streamlit
 - **LLM**: Groq open-source chat models — `openai/gpt-oss-120b` (default), `qwen/qwen3.8-27b`, `allam-2-7b`
-  (Llama models are not available on the current Groq API key; see the note below)
+  (Llama models are not available on the current Groq API key; see note below)
 - **Embeddings**: HuggingFace `sentence-transformers/all-MiniLM-L6-v2` (free, local)
-- **Vector store**: FAISS (in-memory)
-- **PDF parsing**: LangChain `PyPDFLoader` + `RecursiveCharacterTextSplitter`
-- **Retriever exposed as a LangChain Tool** (`pdf_search`) used to ground the answer
+- **Vector stores**: FAISS or Chroma (switchable at runtime)
+- **Loaders**: `PyPDFLoader`, `TextLoader`, `WebBaseLoader`
+- **Splitting**: `RecursiveCharacterTextSplitter` (1000 chars, 200 overlap), top-k = 4
 
-## Setup
-
-This folder is a standalone uv project (Python 3.14+). From inside this folder:
+## Setup (uv, Python 3.14+)
 
 ```bash
-uv sync          # creates .venv and installs all dependencies from pyproject.toml
+uv sync                 # creates .venv, installs deps from pyproject.toml
+cp .env.example .env    # then add your GROQ_API_KEY (get one free at console.groq.com)
 ```
-
-Add your Groq API key in a `.env` file inside this folder (get one free at
-https://console.groq.com):
-
-```
-GROQ_API_KEY=gsk_...
-```
-
-> generate a new key at
-> https://console.groq.com and update `GROQ_API_KEY`, then adjust the model
-> list in the sidebar section of `app.py`.
 
 ## Run
 
 ```bash
-cd langchain-rag-demo      # if you are outside the folder
-uv run streamlit run app.py
+uv run streamlit run post-2-lcel-memory/app.py     # post-2 demo (recommended)
+uv run streamlit run post-1-simple-pdf-rag/app.py  # post-1 demo
 ```
 
-Then open http://localhost:8501 in your browser.
+## Demo script (post-2)
 
-Tip: a sample paper (`NIPS-2017-attention-is-all-you-need-Paper.pdf`) is
-included — upload it and try asking *"What is the transformer architecture?"*
-or *"How does multi-head attention work?"*.
+1. **Simple RAG limitation:** upload `NIPS-2017-attention-is-all-you-need-Paper.pdf`, pick **Simple RAG (no memory)**, ask *"What is multi-head attention?"* then *"Why is it better than a single head?"* — the follow-up should fail or be vague, because the retriever only sees the raw follow-up.
+2. **LCEL + memory:** clear the chat, switch to **LCEL + memory**, ask the same two questions. The follow-up now works, and the metadata panel shows the rewritten standalone question plus measured rewrite/retrieve latencies.
+3. **Vector stores:** switch **FAISS → Chroma** in the sidebar (the index rebuilds) and repeat.
+4. **Response modes:** compare **invoke vs stream vs astream** — streaming shows time-to-first-token in the metadata panel.
+5. **Temperature:** move the slider (0.0 → 1.0) and ask the same question; the panel logs the temperature actually used.
+6. **Multi-source demo:** upload a PDF, paste a web URL together, then ask a question whose answer is only in one of them — confirm the **Retrieved chunks** panel shows the correct loader, file name/URL, and page per chunk. The **Loaded documents** summary shows per-source loader, doc/chunk counts, and measured load time.
 
-## How it works
-1. PDF is uploaded in the sidebar → parsed page-by-page.
-2. Text is chunked (1000 chars, 200 overlap) and embedded with MiniLM.
-3. Chunks are stored in a FAISS index.
-4. A question triggers the `pdf_search` LangChain tool (top-k=4 chunks).
-5. Chunks + question go into a prompt → the Groq model answers grounded only in the document, with retrieved chunks shown as sources.
+## Notes
 
+- Streamlit's file watcher is disabled in `.streamlit/config.toml` (transformers/torchvision scan crash).
+- Temp uploads are written to a `tempfile.mkdtemp` directory and removed on process exit.
