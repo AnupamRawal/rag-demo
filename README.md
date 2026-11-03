@@ -16,11 +16,19 @@ langchain-rag-demo/
 └── src/
     ├── post-1-simple-pdf-rag/
     │   └── app.py              # single-file PDF RAG demo
-    └── post-2-lcel-memory/
-        ├── app.py              # main Streamlit app (UI, sidebar, chat, panels)
-        ├── rag_chains.py       # LCEL chains: simple RAG + memory RAG
-        ├── stores.py           # loaders, embeddings, FAISS/Chroma builders
-        └── .streamlit/config.toml
+    ├── post-2-lcel-memory/
+    │   ├── app.py              # main Streamlit app (UI, sidebar, chat, panels)
+    │   ├── rag_chains.py       # LCEL chains: simple RAG + memory RAG
+    │   ├── stores.py           # loaders, embeddings, FAISS/Chroma builders
+    │   └── .streamlit/config.toml
+    └── post-3-research-agent/
+        ├── app.py              # Streamlit app (agent reasoning, structured card UI, metadata panel)
+        ├── agent.py            # LangGraph agent + ToolStrategy structured output + stream runner
+        ├── tools.py            # search_documents + arxiv_search + save_brief (with telemetry)
+        ├── schemas.py          # Pydantic schemas (ResearchAnswer, PaperBrief, Citation, RelatedPaper)
+        ├── loaders.py          # multi-source loaders, chunking, FAISS indexing, fingerprint cache
+        ├── trimming.py         # AgentMiddleware context trimming (keeps current turn intact)
+        └── .streamlit/         # Streamlit config
 ```
 
 ## What each demo shows
@@ -29,6 +37,7 @@ langchain-rag-demo/
 |---|---|
 | `src/post-1-simple-pdf-rag/` | Basic PDF RAG: upload → chunk → FAISS → grounded answer via a `pdf_search` tool. No memory, one source, invoke only. |
 | `src/post-2-lcel-memory/` | Simple RAG **vs** LCEL + memory, side by side. Multi-source loading (PDF, TXT/MD, web URL), FAISS/Chroma switch, temperature slider, invoke/stream/astream response modes, sources + measured metadata panel. |
+| `src/post-3-research-agent/` | Agentic RAG: Agent dynamically routes between `search_documents` (FAISS over uploaded docs/URLs), `arxiv_search` (live arXiv text search for related papers), and `save_brief` (safe disk persistence). Typed `ResearchAnswer` Pydantic output (answer, brief, citations, related papers, confidence, follow-ups), dynamic context trimming middleware (keeps current turn intact, trims older history newest-first), per-tool telemetry, and LangSmith tracing. |
 
 ## Stack
 
@@ -50,6 +59,7 @@ cp .env.example .env    # then add your GROQ_API_KEY (get one free at console.gr
 ## Run
 
 ```bash
+uv run streamlit run src/post-3-research-agent/app.py  # post-3 demo (agentic RAG + structured output)
 uv run streamlit run src/post-2-lcel-memory/app.py     # post-2 demo (recommended)
 uv run streamlit run src/post-1-simple-pdf-rag/app.py  # post-1 demo
 ```
