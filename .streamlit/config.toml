@@ -1,7 +1,0 @@
-[server]
-# Disable the file watcher: scanning the transformers package crashes
-# (missing torchvision) and aborts the server on reruns.
-fileWatcherType = "none"
-
-[runner]
-fastReruns = true
